@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LIC Unrest Tracker • 37042 (40mi) — Early Warning Mode</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    #map { height: 500px; background: #1f2937; }
+    .risk-low { background-color: #10b981; }
+    .risk-med { background-color: #f59e0b; }
+    .risk-high { background-color: #ef4444; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-white">
+  <div class="max-w-6xl mx-auto p-6">
+    <div class="flex justify-between items-center mb-8">
+      <h1 class="text-4xl font-bold">Low-Intensity Conflict Tracker — 37042</h1>
+      <div class="text-sm text-zinc-400">40-mile radius • Clarksville / Fort Campbell<br>
+      <span id="last-updated" class="text-emerald-400"></span></div>
+    </div>
+
+    <!-- Risk Card (now extremely sensitive) -->
+    <div id="risk-card" class="p-8 rounded-3xl mb-8 text-center risk-low">
+      <div class="text-6xl font-bold" id="count">0</div>
+      <div class="text-xl mt-2" id="risk-level">BASELINE (No signals yet)</div>
+      <div class="text-sm mt-4 text-zinc-400">Early Warning Mode • ANY single indicator = emerging pattern</div>
+    </div>
+
+    <!-- Map (fixed for Vercel/static deploys) -->
+    <div class="mb-8">
+      <h2 class="text-2xl mb-4">Geolocated LIC Mentions</h2>
+      <div id="map" class="rounded-3xl border border-zinc-800"></div>
+      <p id="map-status" class="text-sm text-zinc-400 mt-2 text-center">Loading map…</p>
+    </div>
+
+    <!-- Lists (same as before) -->
+    <div class="mb-8">
+      <h2 class="text-2xl mb-4">Police Blotter & Arrest Indicators</h2>
+      <ul id="blotter-list" class="space-y-3"></ul>
+    </div>
+    <div class="mb-8">
+      <h2 class="text-2xl mb-4">Local Political Controversies & Council Activity</h2>
+      <ul id="political-list" class="space-y-3"></ul>
+    </div>
+    <div class="mb-8">
+      <h2 class="text-2xl mb-4">Local News & Protest Signals</h2>
+      <ul id="news-list" class="space-y-3"></ul>
+    </div>
+
+    <div class="mb-8 bg-zinc-900 p-6 rounded-3xl">
+      <h2 class="text-2xl mb-4">Social Media Pulse (X)</h2>
+      <a href="https://x.com/search?q=(protest%20OR%20riot%20OR%20unrest%20OR%20police%20OR%20arrest%20OR%20blotter%20OR%20council%20OR%20controversy%20OR%20grievance)%20(Clarksville%20OR%20%22Fort%20Campbell%22%20OR%20%22Montgomery%20County%22)&src=typed_query" 
+         target="_blank" class="text-blue-400 underline text-lg block">→ Live X search (real-time early chatter)</a>
+    </div>
+
+    <button onclick="refreshData()" class="px-6 py-3 bg-white text-black font-semibold rounded-full hover:bg-zinc-200">
+      Refresh Early Warning Indicators
+    </button>
+  </div>
+
+  <script>
+    const LAT = 36.56894;
+    const LON = -87.41225;
+    const PROXY = "https://api.allorigins.win/raw?url=";
+    const GDELT_URL = `https://api.gdeltproject.org/api/v2/geo/geo?query=${encodeURIComponent('(protest OR demonstration OR unrest OR police OR arrest OR blotter OR "city council" OR controversy OR grievance OR strike OR rally OR hearing OR meeting OR tension) (Clarksville OR "Fort Campbell" OR "Montgomery County")')}&near=${LAT},${LON},40&timespan=7d&mode=PointData&format=GeoJSON`;
+
+    let map, markerLayer;
+
+    async function fetchRSS(url, listId, keywords = []) {
+      try {
+        const res = await fetch(PROXY + encodeURIComponent(url));
+        const text = await res.text();
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(text, "text/xml");
+        const items = xml.querySelectorAll("item");
+        let html = "";
+        let matchCount = 0;
+        items.forEach(item => {
+          const title = (item.querySelector("title") || {}).textContent || "";
+          const link = (item.querySelector("link") || {}).textContent || "#";
+          const lower = title.toLowerCase();
+          const matches = keywords.length === 0 || keywords.some(k => lower.includes(k));
+          if (matches) {
+            html += `<li class="bg-zinc-900 p-4 rounded-2xl border-l-4 border-orange-500"><a href="${link}" target="_blank" class="text-blue-400 hover:underline">${title}</a></li>`;
+            matchCount++;
+          } else if (html === "") {
+            html += `<li class="bg-zinc-900 p-4 rounded-2xl"><a href="${link}" target="_blank" class="text-blue-400 hover:underline">${title}</a></li>`;
+          }
+        });
+        document.getElementById(listId).innerHTML = html || "<li class='text-zinc-400'>No recent signals.</li>";
+        return matchCount;
+      } catch(e) {
+        document.getElementById(listId).innerHTML = "<li class='text-red-400'>Feed unavailable</li>";
+        return 0;
+      }
+    }
+
+    function initMap() {
+      try {
+        map = L.map('map').setView([LAT, LON], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap',
+          maxZoom: 19
+        }).addTo(map);
+        markerLayer = L.layerGroup().addTo(map);
+        document.getElementById('map-status').textContent = 'Map ready — markers will appear on signals';
+        setTimeout(() => map.invalidateSize(), 300); // fixes gray box on Vercel
+      } catch (err) {
+        document.getElementById('map-status').innerHTML = '<span class="text-red-400">Map failed — check console</span>';
+      }
+    }
+
+    async function fetchData() {
+      let features = [];
+      try { const geo = await (await fetch(GDELT_URL)).json(); features = geo.features || []; } catch(e) {}
+
+      const gdeltCount = features.length;
+      const blotterCount = await fetchRSS("https://www.clarksvilleonline.com/feed/", "blotter-list", ["police","arrest","blotter","crime","suspect","officer"]);
+      const politicalCount = await fetchRSS("https://www.clarksvilletn.gov/RSSFeed.aspx?ModID=65&CID=City-Council-3", "political-list", ["council","agenda","controversy","hearing","meeting"]);
+      const newsCount = await fetchRSS("https://www.clarksvilleonline.com/feed/", "news-list", ["protest","demonstration","rally","unrest"]);
+
+      // ULTRA-LOW THRESHOLD: ANY 1+ signal = early pattern
+      const totalScore = gdeltCount + blotterCount + politicalCount + newsCount;
+
+      document.getElementById('count').textContent = totalScore;
+      const card = document.getElementById('risk-card');
+      const levelEl = document.getElementById('risk-level');
+      if (totalScore === 0) {
+        card.className = 'p-8 rounded-3xl mb-8 text-center risk-low';
+        levelEl.textContent = 'BASELINE (No signals yet)';
+      } else if (totalScore <= 3) {
+        card.className = 'p-8 rounded-3xl mb-8 text-center risk-med';
+        levelEl.textContent = 'EARLY PATTERN EMERGING — potential worsening starting';
+      } else {
+        card.className = 'p-8 rounded-3xl mb-8 text-center risk-high';
+        levelEl.textContent = 'ELEVATED LIC BUILDUP';
+      }
+
+      if (map && markerLayer) {
+        markerLayer.clearLayers();
+        features.forEach(f => {
+          const [lon, lat] = f.geometry.coordinates;
+          L.marker([lat, lon]).addTo(markerLayer).bindPopup('Early LIC signal');
+        });
+      }
+
+      document.getElementById('last-updated').textContent = `Updated: ${new Date().toLocaleString()}`;
+    }
+
+    window.onload = () => {
+      initMap();
+      fetchData();
+    };
+
+    function refreshData() { fetchData(); }
+  </script>
+</body>
+</html>
