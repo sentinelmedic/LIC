@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LIC Unrest Tracker • 37042 (40mi) — Low Intensity Conflict Mode</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    #map { height: 500px; }
+    .risk-low { background-color: #10b981; }
+    .risk-med { background-color: #f59e0b; }
+    .risk-high { background-color: #ef4444; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-white">
+  <div class="max-w-6xl mx-auto p-6">
+    <div class="flex justify-between items-center mb-8">
+      <h1 class="text-4xl font-bold">Low-Intensity Conflict Tracker — 37042</h1>
+      <div class="text-sm text-zinc-400">40-mile radius • Clarksville / Fort Campbell<br>
+      <span id="last-updated" class="text-emerald-400"></span></div>
+    </div>
+
+    <!-- Risk Card -->
+    <div id="risk-card" class="p-8 rounded-3xl mb-8 text-center risk-low">
+      <div class="text-6xl font-bold" id="count">0</div>
+      <div class="text-xl mt-2" id="risk-level">BASELINE (No LIC Signals)</div>
+      <div class="text-sm mt-4 text-zinc-400">LIC Indicators (7 days) • Sensitive to grievances & mobilization</div>
+    </div>
+
+    <!-- Map -->
+    <div class="mb-8">
+      <h2 class="text-2xl mb-4">Geolocated LIC Mentions</h2>
+      <div id="map" class="rounded-3xl overflow-hidden border border-zinc-800"></div>
+    </div>
+
+    <!-- Police Blotter -->
+    <div class="mb-8">
+      <h2 class="text-2xl mb-4">Police Blotter & Arrest Indicators</h2>
+      <ul id="blotter-list" class="space-y-3"></ul>
+    </div>
+
+    <!-- Political -->
+    <div class="mb-8">
+      <h2 class="text-2xl mb-4">Local Political Controversies & Council Activity</h2>
+      <ul id="political-list" class="space-y-3"></ul>
+    </div>
+
+    <!-- News -->
+    <div class="mb-8">
+      <h2 class="text-2xl mb-4">Local News & Protest Signals</h2>
+      <ul id="news-list" class="space-y-3"></ul>
+    </div>
+
+    <!-- Social -->
+    <div class="mb-8 bg-zinc-900 p-6 rounded-3xl">
+      <h2 class="text-2xl mb-4">Social Media Pulse (X)</h2>
+      <a href="https://x.com/search?q=(protest%20OR%20riot%20OR%20unrest%20OR%20police%20OR%20arrest%20OR%20blotter%20OR%20council%20OR%20controversy%20OR%20grievance)%20(Clarksville%20OR%20%22Fort%20Campbell%22%20OR%20%22Montgomery%20County%22)&src=typed_query" 
+         target="_blank" class="text-blue-400 underline text-lg block">→ Live X search for LIC keywords (real-time chatter)</a>
+    </div>
+
+    <button onclick="refreshData()" class="px-6 py-3 bg-white text-black font-semibold rounded-full hover:bg-zinc-200">
+      Refresh LIC Indicators
+    </button>
+  </div>
+
+  <script>
+    const LAT = 36.56894; 
+    const LON = -87.41225;
+    const PROXY = "https://api.allorigins.win/raw?url=";
+    const GDELT_URL = `https://api.gdeltproject.org/api/v2/geo/geo?query=${encodeURIComponent('(protest OR demonstration OR unrest OR police OR arrest OR blotter OR "city council" OR controversy OR grievance OR strike OR rally OR hearing OR meeting OR tension) (Clarksville OR "Fort Campbell" OR "Montgomery County")')}&near=${LAT},${LON},40&timespan=7d&mode=PointData&format=GeoJSON`;
+
+    let map, markerLayer;
+
+    async function fetchRSS(url, listId, keywords = []) {
+      try {
+        const res = await fetch(PROXY + encodeURIComponent(url));
+        const text = await res.text();
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(text, "text/xml");
+        const items = xml.querySelectorAll("item");
+        let html = "";
+        items.forEach(item => {
+          const title = (item.querySelector("title") || {}).textContent || "";
+          const link = (item.querySelector("link") || {}).textContent || "#";
+          const lower = title.toLowerCase();
+          if (keywords.length === 0 || keywords.some(k => lower.includes(k))) {
+            html += `<li class="bg-zinc-900 p-4 rounded-2xl"><a href="${link}" target="_blank" class="text-blue-400 hover:underline">${title}</a></li>`;
+          }
+        });
+        document.getElementById(listId).innerHTML = html || "<li class='text-zinc-400'>No recent signals.</li>";
+      } catch(e) {
+        document.getElementById(listId).innerHTML = "<li class='text-red-400'>Feed unavailable</li>";
+      }
+    }
+
+    async function fetchData() {
+      // GDELT
+      let features = [];
+      try {
+        const geo = await (await fetch(GDELT_URL)).json();
+        features = geo.features || [];
+      } catch(e) {}
+
+      const gdeltCount = features.length;
+
+      // RSS feeds
+      await fetchRSS("https://www.clarksvilleonline.com/feed/", "blotter-list", ["police","arrest","blotter","crime","suspect","officer"]);
+      await fetchRSS("https://www.clarksvilletn.gov/RSSFeed.aspx?ModID=65&CID=City-Council-3", "political-list", ["council","agenda","controversy","hearing","meeting"]);
+      await fetchRSS("https://www.clarksvilleonline.com/feed/", "news-list", ["protest","demonstration","rally","unrest"]);
+
+      const totalScore = gdelt
