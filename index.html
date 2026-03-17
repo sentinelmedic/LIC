@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>LIC Unrest Tracker • 37042 (40mi) — Low Intensity Conflict Mode</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    #map { height: 500px; }
+    .risk-low { background-color: #10b981; }
+    .risk-med { background-color: #f59e0b; }
+    .risk-high { background-color: #ef4444; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-white">
+  <!-- Your existing body content stays exactly the same -->
+  <!-- ... paste the rest of your <div class="max-w-6xl ..."> here ... -->
+
+  <script>
+    // Your existing constants + functions, but add this improved fetchData map part:
+    async function fetchData() {
+      // ... your GDELT + RSS code ...
+
+      // Improved map for Safari
+      if (!map) {
+        map = L.map('map').setView([LAT, LON], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap',
+          crossOrigin: true
+        }).addTo(map);
+        markerLayer = L.layerGroup().addTo(map);
+      } else {
+        markerLayer.clearLayers();
+      }
+
+      // ... rest of your features loop ...
+
+      // Force Safari redraw
+      setTimeout(() => { if (map) map.invalidateSize(); }, 500);
+
+      document.getElementById('last-updated').textContent = `Updated: ${new Date().toLocaleString()}`;
+    }
+
+    // Tailwind force init
+    function initTailwind() {
+      if (typeof tailwind !== 'undefined') {
+        console.log('Tailwind ready');
+      } else {
+        setTimeout(initTailwind, 200);
+      }
+    }
+    window.addEventListener('load', initTailwind);
+
+    function refreshData() { fetchData(); }
+    fetchData();
+  </script>
+</body>
+</html>
